@@ -6,11 +6,12 @@ version: '3'
 services:
   sync-host-bind-volume:
     build: .
-    tty: false
+    restart: on-failure
     user: "${HOST_UID}:${HOST_GID}"
     tmpfs:
       - /dvs/cache
     environment:
+      - SYNC_VOLUME_NAME=data-host
       - SYNC_IGNORE_NAMES=entry*
       - SYNC_IGNORE_PATHS=.git
       - SYNC_SERVER_HOST=sync-destination-server
@@ -23,10 +24,11 @@ services:
 
   sync-data-docker-volume:
     build: .
-    tty: false
+    restart: on-failure
     tmpfs:
       - /dvs/cache
     environment:
+      - SYNC_VOLUME_NAME=data-docker
       - SYNC_UID=35
       - SYNC_GID=35
     volumes:

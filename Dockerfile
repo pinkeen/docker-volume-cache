@@ -4,6 +4,7 @@ RUN apk --no-cache add \
         unison \
         sudo \
         findmnt \
+        rsync \
     && mkdir -p /dvs \
     && chmod ugo+rwx /dvs
 

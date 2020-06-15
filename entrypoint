@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+SYNC_VOLUME_NAME="${SYNC_VOLUME_NAME:-$HOSTNAME}"
 SYNC_VOLUME_MOUNTPOINT="/dvs/data"
 
 SYNC_PORT="${SYNC_PORT:-7733}"
@@ -90,10 +91,9 @@ else
         watch=true
 
         repeat=watch
-        retry=3
-        maxerrors=10
+        retry=${SYNC_UNISON_RETRY:-5}
+        maxerrors=${SYNC_UNISON_MAX_ERRORS:-20}
 
-        sortnewfirst=true
         terse=true
         silent=false
 
@@ -101,22 +101,22 @@ else
         logfile=$SYNC_UNISON_DIR/unison.log
 
         unicode=true
-        ignorecase=true
+        ignorecase=${SYNC_UNISON_IGNORE_CASE:-true}
 
         group=false
         owner=false
         links=true
         numericids=true
+        dontchmod=true
         perms=0
 
-        ignorearchives=true
-        ignorelocks=true
+        ignorearchives=${SYNC_UNISON_IGNORE_ARCHIVES:-false}
+        ignorelocks=${SYNC_UNISON_IGNORE_LOCKS-true}
         stream=true
         fastcheck=true
-        xferbycopying=true
-        maxbackups=0
-        maxthreads=1000
+        backups=false
 
+        ignore = Name {*.unison.tmp}
         ignore = Name {${SYNC_IGNORE_NAMES}}
         ignore = Path {${SYNC_IGNORE_PATHS}}
 END_UNISON_PROFILE
@@ -127,6 +127,7 @@ END_UNISON_PROFILE
 fi
 
 export UNISON="$SYNC_UNISON_DIR"
+export UNISONLOCALHOSTNAME="${SYNC_VOLUME_NAME}"
 
 if [ "$SYNC_EUID" == "0" ]  && [ "$SYNC_EUID" != "$SYNC_UID" ] ; then
     echo "[INFO] Syncing after becoming user: $SYNC_UID:$SYNC_GID"
