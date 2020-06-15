@@ -40,11 +40,11 @@ SYNC_SRC="/dvs/src"
 SYNC_DST="/dvs/dst"
 SYNC_CACHE_DIR="/var/cache/dvs"
 
-SYNC_EXTRA_GIDS="${SYNC_EXTRA_GIDS:-}"
+SYNC_EXTRA_GIDS="${SYNC_EXTRA_GIDS:-0}"
 
 SYNC_UID="${SYNC_UID:-$(id -u)}"
 SYNC_GID="${SYNC_UID:-$(id -g)}"
-SYNC_UMASK="${SYNC_UMASK:-0002}"
+SYNC_UMASK="${SYNC_UMASK:-002}"
 
 SYNC_EXCLUDE_NAMES="${SYNC_EXCLUDE_NAMES:-}"
 SYNC_EXCLUDE_PATHS="${SYNC_EXCLUDE_PATHS:-}"
@@ -55,6 +55,8 @@ mountpoint $SYNC_DST &>/dev/null || ( echo "[ERROR] Destination path is not a mo
 SYNC_GROUP="$(getent group $SYNC_GID 2>/dev/null | cut -d: -f1)" || addgroup -g $SYNC_GID ${SYNC_GROUP:=dvs}
 SYNC_USER="$(getent passwd $SYNC_UID 2>/dev/null | cut -d: -f1)" || adduser -H -D -G $SYNC_GROUP -u $SYNC_UID ${SYNC_USER:=dvs}
 
+echo "[INFO] Syncing as: $SYNC_GROUP:$SYNC_USER ($SYNC_UID:$SYNC_GID)"
+
 for EXTRA_GID in $SYNC_EXTRA_GIDS ; do
     if ! EXTRA_GROUP="$(getent group $EXTRA_GID 2>/dev/null | cut -d: -f1)" ; then
         addgroup -g $EXTRA_GID ${EXTRA_GROUP:=dvs$EXTRA_GID}
@@ -63,7 +65,17 @@ for EXTRA_GID in $SYNC_EXTRA_GIDS ; do
     echo "[INFO] Added sync user $SYNC_USER to group: $EXTRA_GROUP ($EXTRA_GID)"
 done
 
-echo "[INFO] Syncing as: $SYNC_GROUP:$SYNC_USER ($SYNC_UID:$SYNC_GID)"
+# It's imperative that we touch / modify these volume mounts as the target user
+# as with osxfs they will gain the UID/GID of the first user that has touched them.
+
+for MOUNTPOINT in `findmnt -A -l -n -o TARGET -t fuse.osxfs` ; do
+    sudo -E -n -u$SYNC_USER -g$SYNC_GROUP touch $MOUNTPOINT/* || true
+    echo "[INFO] Touched OSXFS mountpoint: $MOUNTPOINT"
+done
+
+chown $SYNC_UID:$SYNC_GID $SYNC_SRC $SYNC_DST
+chmod g+rwxs $SYNC_SRC $SYNC_DST
+chown $SYNC_UID:$SYNC_GID -R $SYNC_CACHE_DIR
 
 mkdir -p $SYNC_CACHE_DIR
 
@@ -77,10 +89,7 @@ echo "[INFO] Using destination directory $SYNC_DST "
 stat $SYNC_DST | sed 's/^/[INFO]   /g'
 ls -alsh $SYNC_DST/ | sed 's/^/[INFO]    /g'
 
-chown $SYNC_UID:$SYNC_GID $SYNC_SRC $SYNC_DST
-chown $SYNC_UID:$SYNC_GID -R $SYNC_CACHE_DIR
-
-umask $SYNC_UMASK && echo "[INFO] Using umask: $SYNC_UMASK"
+umask $SYNC_UMASK && echo "[INFO] Using umask: $(umask -S) ($SYNC_UMASK)"
 
 SYNC_UNISON_ARGS=`unison_args "$@"`
 
@@ -88,8 +97,9 @@ echo -e "[INFO] Starting: unison"
 echo "$SYNC_UNISON_ARGS" | tr ' ' '\n' | sed 's/^/[INFO]   /g'
 
 UNISON="${SYNC_CACHE_DIR}" \
-    exec su -mp $SYNC_USER -c /bin/sh -c "command \"\$@\" 2>&1 | sed 's/^/[UNISON] /g'" -- unison unison \
-        $SYNC_UNISON_ARGS
+    exec sudo -E -n -u$SYNC_USER -g$SYNC_GROUP \
+        /usr/bin/unison \
+            $SYNC_UNISON_ARGS
 
 
 

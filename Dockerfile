@@ -1,6 +1,6 @@
 FROM alpine:latest
 
-RUN apk --no-cache add unison
+RUN apk --no-cache add unison sudo findmnt
 COPY entrypoint /usr/bin/dvs
 
 USER root
