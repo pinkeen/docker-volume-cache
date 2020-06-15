@@ -3,7 +3,7 @@
 set -euo pipefail
 
 unison_args() {
-    echo -n \
+    echo -n "\
         -root=$SYNC_SRC \
         -root=$SYNC_DST \
         -prefer=$SYNC_SRC \
@@ -13,6 +13,9 @@ unison_args() {
         -repeat=watch \
         -retry=3 \
         -maxerrors=10 \
+        -nocreationpartial=$SYNC_SRC \
+        -noupdatepartial=$SYNC_SRC \
+        -nodeletetionpartial=$SYNC_SRC \
         \
         -sortnewfirst \
         -contactquietly \
@@ -22,7 +25,9 @@ unison_args() {
         -unicode \
         -ignorecase \
         \
-        -group \
+        -group=false \
+        -owner=false \
+        -links=true \
         -numericids \
         -perms=0 \
         \
@@ -32,22 +37,24 @@ unison_args() {
         -fastcheck=default \
         -xferbycopying \
         -maxbackups=0 \
-        -maxthreads=200 \
-
+        -maxthreads=1000 \
+        -copythreshold=1024 \
+        -copyprog='/bin/cp -av' \
+        -copyprogrest='/bin/cp -av'
+    "
 }
 
 SYNC_SRC="/dvs/src"
 SYNC_DST="/dvs/dst"
-SYNC_CACHE_DIR="/var/cache/dvs"
+SYNC_CACHE_DIR="/dvs/cache"
 
-SYNC_EXTRA_GIDS="${SYNC_EXTRA_GIDS:-0}"
+SYNC_IGNORE_PATHS="${SYNC_IGNORE_PATHS:-}"
+SYNC_IGNORE_NAMES="${SYNC_IGNORE_NAMES:-}"
 
 SYNC_UID="${SYNC_UID:-$(id -u)}"
 SYNC_GID="${SYNC_UID:-$(id -g)}"
 SYNC_UMASK="${SYNC_UMASK:-002}"
-
-SYNC_EXCLUDE_NAMES="${SYNC_EXCLUDE_NAMES:-}"
-SYNC_EXCLUDE_PATHS="${SYNC_EXCLUDE_PATHS:-}"
+SYNC_EXTRA_GIDS="${SYNC_EXTRA_GIDS:-0}"
 
 mountpoint $SYNC_SRC &>/dev/null || ( echo "[ERROR] Source path in not a mountpoint: $SYNC_SRC" >&2 && exit 6 )
 mountpoint $SYNC_DST &>/dev/null || ( echo "[ERROR] Destination path is not a mountpoint: $SYNC_DST" >&2 && exit 7 )
@@ -67,7 +74,6 @@ done
 
 # It's imperative that we touch / modify these volume mounts as the target user
 # as with osxfs they will gain the UID/GID of the first user that has touched them.
-
 for MOUNTPOINT in `findmnt -A -l -n -o TARGET -t fuse.osxfs` ; do
     sudo -E -n -u$SYNC_USER -g$SYNC_GROUP touch $MOUNTPOINT/* || true
     echo "[INFO] Touched OSXFS mountpoint: $MOUNTPOINT"

@@ -5,5 +5,5 @@ COPY entrypoint /usr/bin/dvs
 
 USER root
 WORKDIR "/dvs"
-VOLUME [ "/var/cache/dvs" ]
+VOLUME [ "/dvs/cache" ]
 ENTRYPOINT [ "/usr/bin/dvs" ]
