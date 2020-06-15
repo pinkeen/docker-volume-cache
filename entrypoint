@@ -1,0 +1,104 @@
+#!/bin/sh
+
+set -euo pipefail
+
+unison_args() {
+    echo -n \
+        -root=$SYNC_SRC \
+        -root=$SYNC_DST \
+        -prefer=$SYNC_SRC \
+        -auto \
+        -batch \
+        -watch \
+        -repeat=watch \
+        -retry=3 \
+        -maxerrors=10 \
+        \
+        -sortnewfirst \
+        -contactquietly \
+        -silent=false \
+        -log=false \
+        \
+        -unicode \
+        -ignorecase \
+        \
+        -group \
+        -numericids \
+        -perms=0 \
+        \
+        -ignorearchives \
+        -ignorelocks \
+        -stream \
+        -fastcheck=default \
+        -xferbycopying \
+        -maxbackups=0 \
+        -maxthreads=200 \
+
+}
+
+SYNC_SRC="/dvs/src"
+SYNC_DST="/dvs/dst"
+SYNC_CACHE_DIR="/var/cache/dvs"
+
+SYNC_EXTRA_GIDS="${SYNC_EXTRA_GIDS:-}"
+
+SYNC_UID="${SYNC_UID:-$(id -u)}"
+SYNC_GID="${SYNC_UID:-$(id -g)}"
+SYNC_UMASK="${SYNC_UMASK:-0002}"
+
+SYNC_EXCLUDE_NAMES="${SYNC_EXCLUDE_NAMES:-}"
+SYNC_EXCLUDE_PATHS="${SYNC_EXCLUDE_PATHS:-}"
+
+mountpoint $SYNC_SRC &>/dev/null || ( echo "[ERROR] Source path in not a mountpoint: $SYNC_SRC" >&2 && exit 6 )
+mountpoint $SYNC_DST &>/dev/null || ( echo "[ERROR] Destination path is not a mountpoint: $SYNC_DST" >&2 && exit 7 )
+
+SYNC_GROUP="$(getent group $SYNC_GID 2>/dev/null | cut -d: -f1)" || addgroup -g $SYNC_GID ${SYNC_GROUP:=dvs}
+SYNC_USER="$(getent passwd $SYNC_UID 2>/dev/null | cut -d: -f1)" || adduser -H -D -G $SYNC_GROUP -u $SYNC_UID ${SYNC_USER:=dvs}
+
+for EXTRA_GID in $SYNC_EXTRA_GIDS ; do
+    if ! EXTRA_GROUP="$(getent group $EXTRA_GID 2>/dev/null | cut -d: -f1)" ; then
+        addgroup -g $EXTRA_GID ${EXTRA_GROUP:=dvs$EXTRA_GID}
+    fi
+
+    echo "[INFO] Added sync user $SYNC_USER to group: $EXTRA_GROUP ($EXTRA_GID)"
+done
+
+echo "[INFO] Syncing as: $SYNC_GROUP:$SYNC_USER ($SYNC_UID:$SYNC_GID)"
+
+mkdir -p $SYNC_CACHE_DIR
+
+echo "[INFO] Using cache directory: $SYNC_CACHE_DIR"
+
+echo "[INFO] Using source directory: $SYNC_SRC "
+stat $SYNC_SRC | sed 's/^/[INFO]    /g'
+ls -alsh $SYNC_SRC/ | sed 's/^/[INFO]    /g'
+
+echo "[INFO] Using destination directory $SYNC_DST "
+stat $SYNC_DST | sed 's/^/[INFO]   /g'
+ls -alsh $SYNC_DST/ | sed 's/^/[INFO]    /g'
+
+chown $SYNC_UID:$SYNC_GID $SYNC_SRC $SYNC_DST
+chown $SYNC_UID:$SYNC_GID -R $SYNC_CACHE_DIR
+
+umask $SYNC_UMASK && echo "[INFO] Using umask: $SYNC_UMASK"
+
+SYNC_UNISON_ARGS=`unison_args "$@"`
+
+echo -e "[INFO] Starting: unison"
+echo "$SYNC_UNISON_ARGS" | tr ' ' '\n' | sed 's/^/[INFO]   /g'
+
+UNISON="${SYNC_CACHE_DIR}" \
+    exec su -mp $SYNC_USER -c /bin/sh -c "command \"\$@\" 2>&1 | sed 's/^/[UNISON] /g'" -- unison unison \
+        $SYNC_UNISON_ARGS
+
+
+
+
+
+
+
+
+
+
+
+
