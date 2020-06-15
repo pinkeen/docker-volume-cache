@@ -1,0 +1,51 @@
+version: '3'
+
+# You have to pass your read UID/GID when running this:
+# HOST_UID=$(id -u) HOST_GID=$(id -g) docker-compose up --build
+
+services:
+  sync-host-bind-volume:
+    build: .
+    tty: false
+    user: "${HOST_UID}:${HOST_GID}"
+    tmpfs:
+      - /dvs/cache
+    environment:
+      - SYNC_IGNORE_NAMES=entry*
+      - SYNC_IGNORE_PATHS=.git
+      - SYNC_SERVER_HOST=sync-destination-server
+    volumes:
+      - ${PWD}:/dvs/data
+    networks:
+      - sync-data-volume
+    links:
+      - sync-data-docker-volume:sync-destination-server
+
+  sync-data-docker-volume:
+    build: .
+    tty: false
+    tmpfs:
+      - /dvs/cache
+    environment:
+      - SYNC_UID=35
+      - SYNC_GID=35
+    volumes:
+      - data:/dvs/data
+    networks:
+      - sync-data-volume
+
+  sync-demo:
+    image: alpine
+    tty: true
+    command: ['/bin/sh', '-c', 'sleep 5s; while true ; do date;  ls -alsh /mnt/data ; sleep 5s; done']
+    volumes:
+      - data:/mnt/data
+
+volumes:
+  data: ~
+
+networks:
+  sync-data-volume:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 16384

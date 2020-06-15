@@ -2,93 +2,145 @@
 
 set -euo pipefail
 
-SYNC_SRC="/dvs/src"
-SYNC_DST="/dvs/dst"
+SYNC_VOLUME_MOUNTPOINT="/dvs/data"
+
+SYNC_PORT="${SYNC_PORT:-7733}"
+SYNC_LISTEN_HOST="${SYNC_LISTEN_HOST:-0.0.0.0}"
+SYNC_SERVER_HOST="${SYNC_SERVER_HOST:-}"
+
 SYNC_CACHE_DIR="/dvs/cache"
+
+SYNC_UNISON_DIR="$SYNC_CACHE_DIR/unison"
+SYNC_UNISON_PROFILE="$SYNC_UNISON_DIR/dvs.prf"
+
+SYNC_UNISON_ROOT_SRC="$SYNC_VOLUME_MOUNTPOINT"
+SYNC_UNISON_ROOT_DST="socket://$SYNC_SERVER_HOST:$SYNC_PORT/data"
 
 SYNC_IGNORE_PATHS="${SYNC_IGNORE_PATHS:-}"
 SYNC_IGNORE_NAMES="${SYNC_IGNORE_NAMES:-}"
 
-SYNC_UID="${SYNC_UID:-$(id -u)}"
-SYNC_GID="${SYNC_GID:-$(id -g)}"
+SYNC_EUID="$(id -u)"
+SYNC_EGID="$(id -g)"
+
+SYNC_UID="${SYNC_UID:-$SYNC_EUID}"
+SYNC_GID="${SYNC_GID:-$SYNC_EGID}"
+
 SYNC_UMASK="${SYNC_UMASK:-002}"
 SYNC_EXTRA_GIDS="${SYNC_EXTRA_GIDS:-0}"
 
 
-mountpoint $SYNC_SRC &>/dev/null || ( echo "[ERROR] Source path in not a mountpoint: $SYNC_SRC" >&2 && exit 6 )
-mountpoint $SYNC_DST &>/dev/null || ( echo "[ERROR] Destination path is not a mountpoint: $SYNC_DST" >&2 && exit 7 )
+mountpoint $SYNC_VOLUME_MOUNTPOINT &>/dev/null || ( echo "[ERROR] Data volume path not a mountpoint: $SYNC_VOLUME_MOUNTPOINT" >&2 && exit 7 )
 
-SYNC_GROUP="$(getent group $SYNC_GID 2>/dev/null | cut -d: -f1)" || addgroup -g $SYNC_GID ${SYNC_GROUP:=dvs$SYNC_GID}
-SYNC_USER="$(getent passwd $SYNC_UID 2>/dev/null | cut -d: -f1)" || adduser -H -D -G $SYNC_GROUP -u $SYNC_UID ${SYNC_USER:=dvs$SYNC_UID}
-
-echo "[INFO] Syncing as: $SYNC_GROUP:$SYNC_USER ($SYNC_UID:$SYNC_GID)"
-
-for EXTRA_GID in $SYNC_EXTRA_GIDS ; do
-    if ! EXTRA_GROUP="$(getent group $EXTRA_GID 2>/dev/null | cut -d: -f1)" ; then
-        addgroup -g $EXTRA_GID ${EXTRA_GROUP:=dvs$EXTRA_GID}
+if [ "$SYNC_UID" != "$SYNC_EUID" ] ; then
+    if [ "$SYNC_EUID" != "0" ] ; then
+        echo "[ERROR] This container has to be ran as sync user $SYNC_UID:$SYNC_GID or as root!" >&2
+        exit 10
     fi
 
-    echo "[INFO] Added sync user $SYNC_USER to group: $EXTRA_GROUP ($EXTRA_GID)"
-done
+    echo "Running in ROOT mode: creating sync user $SYNC_UID:$SYNC_GID"
 
-# It's imperative that we touch / modify these volume mounts as the target user
-# as with osxfs they will gain the UID/GID of the first user that has touched them.
-for MOUNTPOINT in `findmnt -A -l -n -o TARGET -t fuse.osxfs` ; do
-    -E -n -u$SYNC_USER -g$SYNC_GROUP touch $MOUNTPOINT/* || true
-    echo "[INFO] Touched OSXFS mountpoint: $MOUNTPOINT"
-done
+    SYNC_GROUP="$(getent group $SYNC_GID 2>/dev/null | cut -d: -f1)" || addgroup -g $SYNC_GID ${SYNC_GROUP:=dvs$SYNC_GID}
+    SYNC_USER="$(getent passwd $SYNC_UID 2>/dev/null | cut -d: -f1)" || adduser -H -D -G $SYNC_GROUP -u $SYNC_UID ${SYNC_USER:=dvs$SYNC_UID}
 
-chown $SYNC_UID:$SYNC_GID $SYNC_SRC $SYNC_DST && chmod g+rwxs $SYNC_SRC $SYNC_DST
-chown $SYNC_UID:$SYNC_GID -R $SYNC_CACHE_DIR
+    for EXTRA_GID in $SYNC_EXTRA_GIDS ; do
+        if ! EXTRA_GROUP="$(getent group $EXTRA_GID 2>/dev/null | cut -d: -f1)" ; then
+            addgroup -g $EXTRA_GID ${EXTRA_GROUP:=dvs$EXTRA_GID}
+        fi
 
-mkdir -p $SYNC_CACHE_DIR && echo "[INFO] Using cache directory: $SYNC_CACHE_DIR"
+        echo "[INFO] Added sync user $SYNC_USER to group: $EXTRA_GROUP ($EXTRA_GID)"
+    done
 
-echo "[INFO] Using source directory: $SYNC_SRC "
-stat $SYNC_SRC | sed 's/^/[INFO]    /g'
-ls -alsh $SYNC_SRC/ | sed 's/^/[INFO]    /g'
-
-echo "[INFO] Using destination directory $SYNC_DST "
-stat $SYNC_DST | sed 's/^/[INFO]   /g'
-ls -alsh $SYNC_DST/ | sed 's/^/[INFO]    /g'
+    # It's imperative that we touch / modify these volume mounts as the target user
+    # as with osxfs they will gain the UID/GID of the first user that has touched them.
+    for MOUNTPOINT in `findmnt -A -l -n -o TARGET -t fuse.osxfs` ; do
+        sudo -E -n -u$SYNC_USER -g$SYNC_GROUP touch $MOUNTPOINT/* || true
+        echo "[INFO] Touched OSXFS mountpoint: $MOUNTPOINT"
+    done
+fi
 
 umask $SYNC_UMASK && echo "[INFO] Using umask: $(umask -S) ($SYNC_UMASK)"
 
-set -x
-UNISON="${SYNC_CACHE_DIR}" \
-    exec -E -n -u$SYNC_USER -g$SYNC_GROUP \
-        /usr/bin/unison \
-            -root=$SYNC_SRC \
-            -root=$SYNC_DST \
-            -prefer=$SYNC_SRC \
-            -auto \
-            -batch \
-            -watch \
-            -repeat=watch \
-            -retry=3 \
-            -maxerrors=10 \
-            \
-            -sortnewfirst \
-            -contactquietly \
-            -silent=false \
-            -log=false \
-            \
-            -unicode \
-            -ignorecase \
-            \
-            -group=true \
-            -owner=true \
-            -links=true \
-            -numericids=false \
-            -perms=0 \
-            \
-            -ignorearchives \
-            -ignorelocks \
-            -stream \
-            -fastcheck=true \
-            -xferbycopying \
-            -maxbackups=0 \
-            -maxthreads=1000 \
-            "$@"
+echo "[INFO] Using cache directory: $SYNC_CACHE_DIR"
+[ -d "$SYNC_CACHE_DIR" ] || ( mkdir -p $SYNC_CACHE_DIR && chown $SYNC_UID:$SYNC_GID -R $SYNC_CACHE_DIR )
+
+echo "[INFO] Using unison directory: $SYNC_UNISON_DIR"
+[ -d "$SYNC_UNISON_DIR" ] || ( mkdir -p $SYNC_UNISON_DIR && chown $SYNC_UID:$SYNC_GID -R $SYNC_UNISON_DIR )
+
+
+echo "[INFO] Using data volume directory: $SYNC_VOLUME_MOUNTPOINT "
+stat $SYNC_VOLUME_MOUNTPOINT | sed 's/^/[INFO]    /g'
+ls -alsh $SYNC_VOLUME_MOUNTPOINT/ | sed 's/^/[INFO]    /g'
+chown $SYNC_UID:$SYNC_GID $SYNC_VOLUME_MOUNTPOINT
+chmod g+rwx $SYNC_VOLUME_MOUNTPOINT
+
+if [ -z "$SYNC_SERVER_HOST" ] ; then
+
+    UNISON_ARGS="-socket=$SYNC_PORT -host=$SYNC_LISTEN_HOST -perms=0 -dontchmod=true"
+    echo "[INFO] Running in SERVER mode with args: $UNISON_ARGS"
+
+else
+
+    cat >$SYNC_UNISON_PROFILE <<END_UNISON_PROFILE
+        root=$SYNC_UNISON_ROOT_SRC
+        root=$SYNC_UNISON_ROOT_DST
+        prefer=$SYNC_UNISON_ROOT_SRC
+
+        auto=true
+        batch=true
+        watch=true
+
+        repeat=watch
+        retry=3
+        maxerrors=10
+
+        sortnewfirst=true
+        terse=true
+        silent=false
+
+        log=false
+        logfile=$SYNC_UNISON_DIR/unison.log
+
+        unicode=true
+        ignorecase=true
+
+        group=false
+        owner=false
+        links=true
+        numericids=true
+        perms=0
+
+        ignorearchives=true
+        ignorelocks=true
+        stream=true
+        fastcheck=true
+        xferbycopying=true
+        maxbackups=0
+        maxthreads=1000
+
+        ignore = Name {${SYNC_IGNORE_NAMES}}
+        ignore = Path {${SYNC_IGNORE_PATHS}}
+END_UNISON_PROFILE
+
+    UNISON_ARGS="dvs"
+    echo "[INFO] Running in CLIENT mode with profile: $UNISON_ARGS"
+    cat $SYNC_UNISON_PROFILE | sed 's/^/[INFO]   /g'
+fi
+
+export UNISON="$SYNC_UNISON_DIR"
+
+if [ "$SYNC_EUID" == "0" ]  && [ "$SYNC_EUID" != "$SYNC_UID" ] ; then
+    echo "[INFO] Syncing after becoming user: $SYNC_UID:$SYNC_GID"
+    exec sudo -E -n -u$SYNC_USER -g$SYNC_GROUP /usr/bin/unison $UNISON_ARGS "$@"
+else
+    echo "[INFO] Syncing as original user: $SYNC_UID:$SYNC_GID"
+    exec /usr/bin/unison $UNISON_ARGS "$@"
+fi
+
+
+
+
+
+
 
 
 
