@@ -1,0 +1,20 @@
+# This override basic configs:
+# docker-compose -f docker-compose.yml docker.compose.linked.yml docker-compose.network.dedicated.yml
+version: '3'
+
+services:
+  sync-host-bind-volume:
+    networks:
+      - sync-data-volume
+
+  sync-data-docker-volume:
+    networks:
+      - sync-data-volume
+
+networks:
+  sync-data-volume:
+    driver: bridge
+    driver_opts:
+      # On a dedicated network we can safely increase the MTU
+      # what should give better sync performance.
+      com.docker.network.driver.mtu: 16384

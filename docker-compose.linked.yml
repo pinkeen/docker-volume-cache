@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+  sync-host-bind-volume:
+    links:
+      - sync-data-docker-volume:sync-destination-server
+    environment: 
+      - SYNC_SERVER_HOST=sync-destination-server
+

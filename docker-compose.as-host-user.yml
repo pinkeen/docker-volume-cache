@@ -1,0 +1,9 @@
+version: '3'
+
+# You have to pass your read UID/GID when running this:
+# HOST_UID=$(id -u) HOST_GID=$(id -g) docker-compose up --build
+
+services:
+  sync-host-bind-volume:
+    user: "${HOST_UID}:${HOST_GID}"
+

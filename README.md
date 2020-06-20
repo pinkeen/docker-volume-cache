@@ -9,7 +9,7 @@ which I have discovered after the fact, however, it uses two containers
 (based on the same image) to ensure permissions (uid/gid) are always guaranteed
 to be proper on both sides.
 
-The image is published to docker hub as `pink33n/docker-volume-sync`.£
+The image is published to docker hub as `pink33n/docker-volume-sync`.
 
 # Example
 
